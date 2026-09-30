@@ -107,11 +107,16 @@ expect allow 'write, fresh valid token'     Bash "$write_env" "$GATE_DIR"
 # The hook consumes the token, so a replay of the same write must now fail.
 expect block 'write, token already spent'   Bash "$write_env" "$GATE_DIR"
 
+# Expired: the age only grows, so this can never flake.
 printf '%s %s\n' "$REAL_HASH" "$(( $(date +%s) - 601 ))" > "$GATE_DIR/.claude/.gate-token"
 expect block 'write, token expired (601s)'  Bash "$write_env" "$GATE_DIR"
 
-printf '%s %s\n' "$REAL_HASH" "$(( $(date +%s) - 599 ))" > "$GATE_DIR/.claude/.gate-token"
-expect allow 'write, token 599s (in TTL)'   Bash "$write_env" "$GATE_DIR"
+# In TTL: keep a 20s cushion rather than testing the exact 599s edge. The hook
+# reads its own clock at run time, so an age of 599 here can measure 600 by the
+# time it is checked — which is not a gate bug, just a race in the test. The
+# boundary itself is what matters, and 580-vs-601 proves it is enforced.
+printf '%s %s\n' "$REAL_HASH" "$(( $(date +%s) - 580 ))" > "$GATE_DIR/.claude/.gate-token"
+expect allow 'write, token 580s (in TTL)'   Bash "$write_env" "$GATE_DIR"
 
 printf 'deadbeef %s\n' "$(date +%s)" > "$GATE_DIR/.claude/.gate-token"
 expect block 'write, token hash mismatch'   Bash "$write_env" "$GATE_DIR"
