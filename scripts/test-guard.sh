@@ -45,7 +45,12 @@ echo "== must BLOCK: deploy (rule 7.2)"
 expect block 'vercel --prod'                Bash  '{"command":"vercel --prod"}'
 expect block 'vercel deploy'                Bash  '{"command":"vercel deploy"}'
 expect block 'npx vercel'                   Bash  '{"command":"npx vercel"}'
-expect block 'padded vercel deploy'         Bash  '{"command":"vercel   deploy   --prod"}'
+expect block 'padded vercel deploy'         Bash '{"command":"vercel   deploy   --prod"}'
+expect block 'npx supabase db reset'        Bash '{"command":"npx supabase db reset"}'
+expect block 'npx supabase@latest db reset' Bash '{"command":"npx supabase@latest db reset"}'
+expect block 'npx -y supabase@latest db push' Bash '{"command":"npx --yes supabase@latest db push"}'
+expect block 'versioned supabase db reset'  Bash '{"command":"npx supabase@2.118.0 db reset"}'
+expect allow 'npx supabase@latest status'   Bash '{"command":"npx supabase@latest status"}'
 
 echo "== must BLOCK: git safety (rule 8.3)"
 expect block 'push --force'                 Bash  '{"command":"git push --force origin main"}'

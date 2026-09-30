@@ -127,7 +127,7 @@ if printf '%s\n%s' "$env_scan" "$env_cmd" | grep -qE '(^|[^A-Za-z0-9_.-])\.env([
 fi
 # --- Database / schema state -------------------------------------------------
 # Regex, not literal substring: `supabase   db   push` must not slip through.
-if printf '%s' "$squashed" | grep -qE 'supabase +db +(push|reset)'; then
+if printf '%s' "$squashed" | grep -qE 'supabase(@[a-z0-9._-]+)? +db +(push|reset)'; then
   block "direct database mutation" \
     "Rule 4.3: supabase db push / db reset are blocked. Write a migration file in supabase/migrations/NNNNNN_kebab_case.sql and hand it to the owner to apply."
 fi
