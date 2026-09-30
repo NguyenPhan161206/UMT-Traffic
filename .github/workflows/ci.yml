@@ -1,0 +1,63 @@
+name: CI
+
+# Gate only. Deployment is NOT this workflow — CLAUDE.md rule 7.2: deploy happens
+# when main is pushed and Vercel's Git integration builds it. Do not add a deploy
+# job here without amending that rule first.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Read-only token. This workflow never writes to the repo.
+permissions:
+  contents: read
+
+# A new push supersedes an in-flight run for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Do not install husky hook shims on the runner.
+  HUSKY: 0
+
+jobs:
+  # The job NAME is load-bearing: main's branch protection requires the status
+  # check context `ci`. Renaming this job without updating
+  # required_status_checks will block every merge. Verified against
+  # /repos/:owner/:repo/branches/main/protection — keep the two in sync.
+  check:
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Pinned to exact release SHAs (rules 5.1/5.3 — no floating tags, no hand-edited lockfiles).
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Rule 8.2: this is the single gate. Same command the owner runs locally.
+      - name: Typecheck and lint
+        run: npm run check
+
+      # Rules 2.1-2.3, 3.1, 4.1, 6.2, 7.4 — the mechanical part of the rulebook,
+      # enforced where it cannot be forgotten.
+      - name: Policy gate (CLAUDE.md)
+        run: bash .claude/skills/check-policy/scripts/check-policy.sh
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist is produced
+        run: test -f dist/index.html

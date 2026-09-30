@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.pnp
+.pnp.js
+
+# build
+dist/
+dist-ssr/
+build/
+*.local
+
+# env — never commit (rule 2.2, 2.3)
+.env
+.env.*
+!.env.example
+
+# supabase
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+
+# vercel
+.vercel/
+
+# husky — generated hook shims, rebuilt by `npm run prepare`
+.husky/_/
+
+# claude code — personal overrides
+.claude/settings.local.json
+CLAUDE.local.md
+
+# logs / editor / os
+*.log
+npm-debug.log*
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
