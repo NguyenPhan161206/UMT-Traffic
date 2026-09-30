@@ -29,10 +29,12 @@
       "Bash(npx vercel:*)",
       "Bash(vercel:*)",
       "Edit(./supabase/config.toml)",
-      "Edit(./vercel.json)"
+      "Edit(./vercel.json)",
+      "Edit(./.env)",
+      "Edit(./.env.local)"
     ],
+    "//deny": "Permission patterns have no exception syntax, so a broad .env.* deny would also block the committable .env.template template. These are the secret files we can name exactly; the PreToolUse hook is what enforces the general case (including .env.production) while still letting .env.template through. READING is denied unconditionally (rule 2.3 — .env holds the owner's PASSPHRASE); WRITING is gated by the hook against the unlock token from scripts/env-unlock.sh (rule 2.6).",
     "deny": [
-      "//": "Permission patterns have no exception syntax, so a broad .env.* deny would also block the committable .env.example template. These are the secret files we can name exactly; the PreToolUse hook is what enforces the general case (including .env.production) while still letting .env.example through.",
       "Read(./.env)",
       "Read(./.env.local)",
       "Read(./.env.*.local)",

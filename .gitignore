@@ -12,7 +12,16 @@ build/
 # env — never commit (rule 2.2, 2.3)
 .env
 .env.*
+# Templates hold variable NAMES, never values. The `!` re-admits them past the
+# `.env.*` rule above — without this, `.env.template` is ignored (verified with
+# `git check-ignore -v .env.template`) and can never reach the remote.
 !.env.example
+!.env.template
+
+# passphrase gate — the owner's own PASSPHRASE lives in .env (never tracked).
+# The unlock token is written by scripts/env-unlock.sh and is per-developer.
+.claude/.gate-token
+.claude/.gate-passphrase
 
 # supabase
 supabase/.temp/

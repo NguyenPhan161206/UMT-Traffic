@@ -78,11 +78,52 @@ env_scan="${path_str//.env.example/}"
 env_scan="${env_scan//.env.sample/}"
 env_scan="${env_scan//.env.template/}"
 env_cmd="${command_str//.env.example/}"
-env_cmd="${env_cmd//.env.sample/}"
-env_cmd="${env_cmd//.env.template/}"
+env_cmd="${command_str//.env.sample/}"
+env_cmd="${command_str//.env.template/}"
 if printf '%s\n%s' "$env_scan" "$env_cmd" | grep -qE '(^|[^A-Za-z0-9_.-])\.env([.][A-Za-z0-9._-]+)?([^A-Za-z0-9_-]|$)'; then
-  block "reading or writing .env files" \
-    "Rule 2.3: never read, print, echo or commit .env / .env.local content. If a value is needed, state its NAME in your summary and let the owner fill it in. (.env.example is allowed — names only.)"
+  # READ is always forbidden (rule 2.3): the file holds the owner's PASSPHRASE.
+  # A WRITE is allowed only with a live unlock token, which only a human can
+  # produce because only a human has a terminal to type the passphrase into.
+  if printf '%s' "$haystack" | grep -qE '(^|[^A-Za-z0-9_.-])(read|cat|less|more|head|tail|grep|awk|sed|xxd|od|cp|print)( |$)'; then
+    block "reading .env files" \
+      "Rule 2.3: never read, print or echo .env / .env.local content — it holds the owner's PASSPHRASE and any local values. If a value is needed, state its NAME in your summary and let the owner fill it in. (.env.template is allowed — names only.)"
+  fi
+
+  # `set -u` is on, and the variable is absent when the hook is exercised
+  # outside Claude Code (scripts/test-guard.sh), so default it to the repo root.
+  project_dir="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  token="$project_dir/.claude/.gate-token"
+  hash_file="$project_dir/.claude/.gate-passphrase"
+  ttl=600
+  now="$(date +%s)"
+
+  if [ -z "$hash_file" ] || [ ! -f "$hash_file" ]; then
+    block "writing .env without an armed gate" \
+      "The write gate is not armed. Ask the owner to run: scripts/env-setup.sh (once), then scripts/env-unlock.sh (per session, valid 10 minutes)."
+  fi
+
+  if [ ! -f "$token" ]; then
+    block "writing .env without an unlock token" \
+      "Ask the owner to run scripts/env-unlock.sh and type their passphrase. There is no way for you to produce that token: it requires a controlling terminal, which you do not have."
+  fi
+
+  token_hash="$(cut -d' ' -f1 < "$token" 2>/dev/null || true)"
+  token_at="$(cut -d' ' -f2 < "$token" 2>/dev/null || echo 0)"
+  expect_hash="$(cat "$hash_file" 2>/dev/null || true)"
+
+  if [ "$token_hash" != "$expect_hash" ]; then
+    block "unlock token does not match this developer's passphrase" \
+      "Run scripts/env-unlock.sh again, in the owner's terminal."
+  fi
+
+  if [ "$((now - token_at))" -ge "$ttl" ]; then
+    rm -f "$token"
+    block "unlock token expired" \
+      "Tokens are valid for 600s. Ask the owner to run scripts/env-unlock.sh again."
+  fi
+
+  # Consume the token so one unlock authorises exactly one write.
+  rm -f "$token"
 fi
 # --- Database / schema state -------------------------------------------------
 # Regex, not literal substring: `supabase   db   push` must not slip through.

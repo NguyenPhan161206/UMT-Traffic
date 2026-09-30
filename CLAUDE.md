@@ -31,17 +31,27 @@ const { data } = await supabase.from('submissions').insert({ ...body, score: bod
 
 ## 2. Secrets & Environment
 
-2.1 The public env whitelist is exactly two variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Any other `VITE_*` variable is a violation.
-2.2 `service_role` key MUST live only in local `.env` for the Supabase CLI. MUST NEVER reach the browser, committed code, or any logged output.
-2.3 MUST NOT read `.env` / `.env.local` content, print it, echo it, or include it in a commit message.
+2.1 The public env whitelist is exactly two variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`. Any other `VITE_*` variable is a violation.
+2.2 The secret key (`sb_secret_...`, formerly `service_role`) MUST NEVER reach the browser, committed code, or any logged output. It bypasses RLS entirely, and Supabase returns HTTP 401 if it is used from a browser.
+2.3 MUST NOT read `.env` / `.env.local` content, print it, echo it, or include it in a commit message. `.env` holds the owner's PASSPHRASE (see 2.6).
 2.4 MUST NOT reference `process.env` ad hoc. Only the whitelisted `import.meta.env.*` accesses above.
+2.5 `.env.template` is the committable, name-only template. It MUST keep every value empty; a filled-in template is a secret wearing the exemption as a disguise.
+2.6 Writing `.env` / `.env.local` requires a live unlock token produced by the owner running `scripts/env-unlock.sh` in their own terminal. The agent cannot create that token: it requires a controlling terminal, which tool calls do not have. Ask the owner to run it; never attempt to work around the gate.
+
+### Why the publishable key and not `anon`
+
+`VITE_SUPABASE_PUBLISHABLE_KEY` carries an `sb_publishable_...` value, the replacement for the legacy `anon` key. The legacy keys were HS256 JWTs signed with a `JWT_SECRET` shared with the high-privilege `service_role` key, so the two could not be rotated independently — rotating either logged out every live session. The new pair is not a JWT and rotates independently.
+
+Supabase stops issuing `anon` to new projects and deletes the legacy keys in late 2026. Whitelisting `ANON_KEY` here would break the handover, because the owner's fresh project may not have one.
+
+`sb_publishable_` is NOT a JWT and MUST NOT be sent as `Authorization: Bearer`; it goes in the `apikey` header. `supabase-js` handles this when constructed with `supabaseUrl` + `supabaseKey`.
 
 ---
 
 ## 3. Data Access
 
 3.1 Exactly **one** Supabase client, created once in `src/lib/supabase.ts` and exported. MUST NOT call `createClient()` anywhere else.
-3.2 MUST NOT hand-write SQL, raw PostgREST calls, or construct Supabase REST URLs from the browser.
+3.2 MUST NOT hand-write SQL, raw PostgREST calls, or construct Supabase REST URLs from the browser. Calling `supabase.rpc('fn')` on the single sanctioned client is allowed; it is still the DB that decides the result (see 1.3).
 3.3 MUST NOT add a second data-fetching path (direct `fetch` to Supabase, axios, etc.).
 3.4 Database types MUST be generated from the Supabase schema and imported — no hand-maintained type duplicates.
 
@@ -51,7 +61,7 @@ const { data } = await supabase.from('submissions').insert({ ...body, score: bod
 
 4.1 Every schema/RLS/index change MUST be a file in `supabase/migrations/` named `NNNNNN_kebab_case.sql`.
 4.2 MUST NOT edit tables, policies, or RLS by hand in the Supabase Dashboard.
-4.3 MUST NOT run `supabase db push` / `supabase db reset` — these are blocked by a hook. Migrations are applied by me.
+4.3 MUST NOT run `supabase db push` / `supabase db reset` — these are blocked by a hook (`.claude/hooks/block-forbidden.sh`) and are also listed under `ask` in `.claude/settings.json` as a second layer. Migrations are applied by me.
 4.4 Any migration containing `drop` or `delete` against a table holding contest data MUST include a preceding `supabase db dump` backup step and MUST be called out explicitly in the summary. MUST NOT run such a migration silently.
 
 ---

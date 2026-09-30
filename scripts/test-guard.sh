@@ -3,9 +3,10 @@
 HOOK=".claude/hooks/block-forbidden.sh"
 pass=0; fail=0
 
-expect() { # expect <block|allow> <label> <tool_name> <json tool_input>
+expect() { # expect <block|allow> <label> <tool_name> <json tool_input> [CLAUDE_PROJECT_DIR]
   local want="$1" label="$2" name="$3" input="$4" got
-  printf '{"tool_name":"%s","tool_input":%s}' "$name" "$input" | bash "$HOOK" >/dev/null 2>/tmp/hook-err.txt
+  printf '{"tool_name":"%s","tool_input":%s}' "$name" "$input" \
+    | CLAUDE_PROJECT_DIR="${5:-}" bash "$HOOK" >/dev/null 2>/tmp/hook-err.txt
   got=$?
   if [ "$got" = "2" ]; then got=block; else got=allow; fi
   if [ "$got" = "$want" ]; then
@@ -25,13 +26,14 @@ expect block 'service_role in file name'    Write '{"file_path":"/r/supabase/ser
 expect block 'service_role in file CONTENT' Write '{"file_path":"/r/src/config.ts","content":"const k=\"eyJhbGciOiJIUzI1NiJ9\"; // service_role"}'
 expect block 'service_role in new_string'   Edit  '{"file_path":"/r/src/a.ts","old_string":"a","new_string":"b service_role"}'
 
-echo "== must BLOCK: env files (rule 2.3)"
+echo "== must BLOCK: reading env files (rule 2.3)"
 expect block 'cat .env'                     Bash  '{"command":"cat .env"}'
 expect block 'cat .env.local'               Bash  '{"command":"cat .env.local"}'
-expect block 'write .env'                   Bash  '{"command":"echo FOO=bar > .env"}'
 expect block 'read .env via Read'           Read  '{"file_path":"/r/.env"}'
 expect block 'read .env.production'         Read  '{"file_path":"/r/.env.production"}'
 expect block 'cp .env.example .env'         Bash  '{"command":"cp .env.example .env"}'
+expect block 'head .env'                    Bash  '{"command":"head -5 .env"}'
+expect block 'grep in .env'                 Bash  '{"command":"grep PASSPHRASE .env"}'
 
 echo "== must BLOCK: database (rule 4.3)"
 expect block 'supabase db push'             Bash  '{"command":"supabase db push --linked"}'
@@ -60,6 +62,8 @@ expect block 'yarn add redux'               Bash  '{"command":"yarn add redux"}'
 
 echo "== must ALLOW"
 expect allow '.env.example written'         Write '{"file_path":"/r/.env.example","content":"VITE_SUPABASE_URL="}'
+expect allow '.env.template written'        Write '{"file_path":"/r/.env.template","content":"VITE_SUPABASE_URL="}'
+expect allow '.env.template read'           Read  '{"file_path":"/r/.env.template"}'
 expect allow '.env.example edited'          Edit  '{"file_path":"/r/.env.example","old_string":"a","new_string":"b"}'
 expect allow '.env.example read'            Read  '{"file_path":"/r/.env.example"}'
 expect allow 'vuex (not the vue substring)' Bash  '{"command":"npm install vuex"}'
@@ -75,6 +79,56 @@ expect allow 'edit src'                     Edit  '{"file_path":"/r/src/lib/supa
 expect allow 'edit CLAUDE.md'               Edit  '{"file_path":"/r/CLAUDE.md"}'
 expect allow 'read migration'               Read  '{"file_path":"/r/supabase/migrations/000001_init.sql"}'
 expect allow 'eslint (for contrast)'        Bash  '{"command":"npm install --save-dev eslint"}'
+
+# --- .env write gate -------------------------------------------------------
+# Exercised against a throwaway project dir so the real repo's real gate state
+# (and any real token) is never touched or consumed.
+# Fail loudly. If mktemp cannot create the dir (disk full, TMPDIR unwritable)
+# then $GATE_DIR is empty, every path below silently resolves to the repo root,
+# and the gate assertions below "pass" while testing nothing at all — which is
+# exactly the failure mode this suite exists to catch.
+if ! GATE_DIR="$(mktemp -d)"; then
+  printf 'FATAL: mktemp -d failed (disk full? TMPDIR unwritable?). Gate assertions would be meaningless.\n' >&2
+  exit 1
+fi
+[ -d "$GATE_DIR" ] || { printf 'FATAL: GATE_DIR=%s is not a directory\n' "$GATE_DIR" >&2; exit 1; }
+trap 'rm -rf "$GATE_DIR"' EXIT
+mkdir -p "$GATE_DIR/.claude"
+REAL_HASH="$(printf '%s' 'correct horse battery staple' | sha256sum | cut -d' ' -f1)"
+printf '%s' "$REAL_HASH" > "$GATE_DIR/.claude/.gate-passphrase"
+
+write_env='{"command":"echo FOO=bar > .env"}'
+
+echo "== gate: .env write WITHOUT a token"
+expect block 'write, gate not armed'        Bash "$write_env" "$GATE_DIR"
+
+printf '%s %s\n' "$REAL_HASH" "$(date +%s)" > "$GATE_DIR/.claude/.gate-token"
+expect allow 'write, fresh valid token'     Bash "$write_env" "$GATE_DIR"
+# The hook consumes the token, so a replay of the same write must now fail.
+expect block 'write, token already spent'   Bash "$write_env" "$GATE_DIR"
+
+printf '%s %s\n' "$REAL_HASH" "$(( $(date +%s) - 601 ))" > "$GATE_DIR/.claude/.gate-token"
+expect block 'write, token expired (601s)'  Bash "$write_env" "$GATE_DIR"
+
+printf '%s %s\n' "$REAL_HASH" "$(( $(date +%s) - 599 ))" > "$GATE_DIR/.claude/.gate-token"
+expect allow 'write, token 599s (in TTL)'   Bash "$write_env" "$GATE_DIR"
+
+printf 'deadbeef %s\n' "$(date +%s)" > "$GATE_DIR/.claude/.gate-token"
+expect block 'write, token hash mismatch'   Bash "$write_env" "$GATE_DIR"
+
+: > "$GATE_DIR/.claude/.gate-token"
+expect block 'write, token empty'           Bash "$write_env" "$GATE_DIR"
+
+rm -f "$GATE_DIR/.claude/.gate-passphrase"
+printf '%s %s\n' "$REAL_HASH" "$(date +%s)" > "$GATE_DIR/.claude/.gate-token"
+expect block 'write, hash file removed'     Bash "$write_env" "$GATE_DIR"
+
+# The template must stay writable with no token at all.
+expect allow 'write .env.template, no gate' Write '{"file_path":"/r/.env.template","content":"X=1"}' "$GATE_DIR"
+expect allow 'write .env.example, no gate'  Write '{"file_path":"/r/.env.example","content":"X=1"}' "$GATE_DIR"
+# And a live token must not unlock reading.
+printf '%s %s\n' "$REAL_HASH" "$(date +%s)" > "$GATE_DIR/.claude/.gate-token"
+expect block 'read .env even with token'    Bash '{"command":"cat .env"}' "$GATE_DIR"
 
 printf '\nhook test: %d ok, %d wrong\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

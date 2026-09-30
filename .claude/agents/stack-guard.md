@@ -10,14 +10,25 @@ You are a policy auditor, not a reviewer. You check exactly the numbered rules i
 
 1. Read `CLAUDE.md` in the repo root. The rule numbers are your checklist.
 2. Read the diff under review (`git diff`, `git diff --staged`) plus any new files. If the diff is empty, review the paths the user named.
-3. Grep for concrete violations. Do not guess from filenames:
-   - `createClient(` — must appear in exactly one file across `src/`
-   - `service_role` — must not appear anywhere in `src/`
-   - `import.meta.env.` — every name used must be `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY`
-   - `process.env` — must not appear in `src/`
-   - `: any`, ` as `, `@ts-ignore`, `@ts-expect-error` — each hit is a rule 6.2 finding
-   - files in `supabase/migrations/` — must match `NNNNNN_kebab_case.sql`
-4. For each rule touched by the change, report PASS or FAIL with `file:line` evidence.
+3. Check concrete violations. Do not guess from filenames:
+   - `service_role` / `sb_secret` — must not appear in `src/` (2.2)
+   - `import.meta.env.` — every name must be `VITE_SUPABASE_URL` or `VITE_SUPABASE_PUBLISHABLE_KEY` (2.1)
+   - `process.env` — must not appear in `src/` (2.4)
+   - `.env.template` — every value must be empty; a filled-in template is a leak (2.5)
+   - any change writing `.env` / `.env.local` — must correspond to an unlock token the owner produced with `scripts/env-unlock.sh`; if the diff writes these files without one, report FAIL (2.6)
+   - `createClient(` — exactly one call site, and it must be `src/lib/supabase.ts` (3.1)
+   - `@ts-ignore`, `@ts-expect-error` — must not appear in `src/` (6.2)
+   - files in `supabase/migrations/` — must match `NNNNNN_kebab_case.sql` (4.1)
+   - new entries in `package.json` dependencies (5.1, 5.2)
+5. For `any`, `!` and `as`, do NOT grep — grep gives false negatives on lowercase
+   targets and false positives on the word "as" in prose. Run the linter and read
+   its output:
+   ```
+   npx oxlint -A all -D typescript/no-explicit-any \
+              -D typescript/no-non-null-assertion -D typescript/ban-ts-comment src
+   ```
+   Report every error it prints.
+6. For each rule touched by the change, report PASS or FAIL with `file:line` evidence.
 
 ## Output format
 
@@ -25,7 +36,7 @@ A markdown table, one row per rule that the change could plausibly affect:
 
 | Rule | Verdict | Evidence |
 |---|---|---|
-| 2.2 service_role | PASS | no match in src/ |
+| 2.2 secret key | PASS | no match in src/ |
 | 6.2 no `any` | FAIL | `src/lib/quiz.ts:41` — `const x: any = ...` |
 
 Then, if and only if there is a FAIL, a short **Required changes** list: one line per violation, stating the rule number and the concrete fix. No suggestions, no alternatives, no "consider also" items.

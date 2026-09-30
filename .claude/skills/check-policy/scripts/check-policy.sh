@@ -30,6 +30,28 @@ hits() {
   grep -rnE "${args[@]}" --exclude-dir=node_modules --exclude-dir=dist "$1" "$3" 2>/dev/null
 }
 
+# --- 0. Config files parse ---------------------------------------------------
+# A malformed settings.json does not degrade gracefully: Claude Code rejects the
+# whole file, taking the deny list AND the PreToolUse hook registration with it.
+# That silently disarms every rule below while the repo still looks correct.
+head2 "Config integrity"
+# tsconfig*.json are JSONC (comments are legal there) and are already validated
+# by tsc itself below, so they are deliberately not in this list.
+for cfg in .claude/settings.json package.json; do
+  [ -f "$cfg" ] || { skip "$cfg absent"; continue; }
+  if node -e "JSON.parse(require('fs').readFileSync('$cfg','utf8'))" 2>/dev/null; then
+    ok "$cfg is valid JSON"
+  else
+    bad "$cfg is not valid JSON" \
+      "Claude Code silently ignores an unparseable settings.json — the deny list and the PreToolUse hook go with it. Note: a \"//\" comment key is NOT legal JSON inside an array; put it beside the array."
+  fi
+done
+if [ -x .claude/hooks/block-forbidden.sh ]; then
+  ok "hook is executable"
+else
+  bad "hook not executable" "chmod +x .claude/hooks/block-forbidden.sh"
+fi
+
 # --- 1. TypeScript + lint ----------------------------------------------------
 head2 "TypeScript & lint (rule 6.1)"
 if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
@@ -79,7 +101,7 @@ if [ -d src ]; then
   bad_vars=""
   while IFS= read -r name; do
     case "$name" in
-      VITE_SUPABASE_URL|VITE_SUPABASE_ANON_KEY) ;;
+      VITE_SUPABASE_URL|VITE_SUPABASE_PUBLISHABLE_KEY) ;;
       "") ;;
       *) bad_vars="$bad_vars $name" ;;
     esac
@@ -104,14 +126,36 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
     bad "env file(s) tracked in git" "$tracked"
   else ok "no .env* secret file tracked in git"; fi
 
-  # Every .env* on disk must be ignored. .env.example is the one exemption.
+  # Every .env* on disk must be ignored. The name-only templates are the exemptions.
   while IFS= read -r f; do
     case "$f" in
       */.env.example|*/.env.sample|*/.env.template|.env.example|.env.sample|.env.template) continue ;;
     esac
-    if git check-ignore -q "$f" 2>/dev/null; then ok "$f is git-ignored"
-    else bad "$f is not git-ignored" "add .env / .env.* to .gitignore (keep the !.env.example exemption)"; fi
+    # --no-index: ask "would .gitignore catch this path", not "is it ignored
+    # right now". Without it, a force-added file reports as tracked-not-ignored
+    # and the script double-reports one root cause as two failures.
+    if git check-ignore -q --no-index "$f" 2>/dev/null; then ok "$f is git-ignored"
+    else bad "$f is not git-ignored" "add .env / .env.* to .gitignore (keep the !.env.template exemption)"; fi
   done < <(find . -path ./node_modules -prune -o -path ./.git -prune -o -name '.env' -print -o -name '.env.*' -print 2>/dev/null)
+
+  # A template must stay a template. The reason .env.template is committable is
+  # that it holds variable NAMES and nothing else, so a filled-in one is a leak
+  # wearing the exemption as a disguise. The PASSPHRASE line is allowed to be
+  # empty here precisely because it must be filled in .env, not in the template.
+  for tpl in .env.template .env.example; do
+    [ -f "$tpl" ] || continue
+    # Drop comments and blank lines, then keep only NAME=value where the value
+    # is non-empty. PASSPHRASE is excluded by name: it is expected to be filled
+    # in .env, never in the template.
+    filled="$(grep -vE '^[[:space:]]*(#|$)' "$tpl" \
+      | grep -E '^[A-Za-z_][A-Za-z0-9_]*=.+' \
+      | grep -vE '^PASSPHRASE=.+' || true)"
+    if [ -n "$filled" ]; then
+      bad "$tpl has non-empty values" "$(printf '%s' "$filled" | head -n 2 | tr '\n' ' ')"
+    else
+      ok "$tpl holds names only, no values"
+    fi
+  done
 else
   skip "not a git repo yet"
 fi
@@ -120,9 +164,9 @@ fi
 head2 "Data access (rules 3.1-3.2)"
 if [ -d src ]; then
   # Count CALL SITES, not files. Two calls in one file is still two clients.
-  n="$(hits 'createClient[[:space:]]*\\(' 'ts tsx js jsx' src | wc -l | tr -d ' ')"
+  n="$(hits 'createClient[[:space:]]*\(' 'ts tsx js jsx' src | wc -l | tr -d ' ')"
   if [ "$n" = "1" ]; then
-    site="$(hits 'createClient[[:space:]]*\\(' 'ts tsx js jsx' src | head -n1 | cut -d: -f1)"
+    site="$(hits 'createClient[[:space:]]*\(' 'ts tsx js jsx' src | head -n1 | cut -d: -f1)"
     case "$site" in
       src/lib/supabase.ts) ok "exactly one createClient(), in src/lib/supabase.ts" ;;
       *) bad "createClient() must live in src/lib/supabase.ts (rule 3.1)" "found it in $site" ;;
@@ -131,7 +175,7 @@ if [ -d src ]; then
     skip "no createClient() call found yet"
   else
     bad "createClient() called $n times (rule 3.1 allows exactly one)" \
-      "$(hits 'createClient[[:space:]]*\\(' 'ts tsx js jsx' src | cut -d: -f1 | sort -u | tr '\n' ' ')"
+      "$(hits 'createClient[[:space:]]*\(' 'ts tsx js jsx' src | cut -d: -f1 | sort -u | tr '\n' ' ')"
   fi
 
   if out="$(grep -rn 'supabase\.from(' src --include='*.ts' --include='*.tsx' 2>/dev/null | grep -v 'src/lib/')"; then
@@ -146,7 +190,7 @@ if [ -d src ]; then
       "$(printf '%s\n' "$out" | head -n 5 | tr '\n' ' ')"
   else ok "no hand-built PostgREST/REST path in src/"; fi
 
-  if out="$(hits '[^A-Za-z0-9_]fetch[[:space:]]*\\(' 'ts tsx' src)"; then
+  if out="$(hits '[^A-Za-z0-9_]fetch[[:space:]]*\(' 'ts tsx' src)"; then
     bad "fetch() in src/ — rule 3.3 forbids a second data path; use the single client" \
       "$(printf '%s\n' "$out" | head -n 5 | tr '\n' ' ')"
   else ok "no direct fetch() data path in src/"; fi
@@ -195,7 +239,7 @@ if [ -d src ] && [ -x node_modules/.bin/oxlint ]; then
 
   # `as` cannot be expressed as a linter rule without false-positiving every
   # `import * as ns` and every re-export, so it stays INFO: report, don't block.
-  if out="$(hits '(^|[=(,:;\[!&|?]|^[[:space:]]+)as[[:space:]]+(const|[A-Za-z_][A-Za-z0-9_]*(\[\])?|(unknown|string|number|boolean))' 'ts tsx' src | grep -vE 'as (default|namespace|const enum)')"; then
+  if out="$(hits '[^[:alnum:]_]as[[:space:]]+(const|[A-Z][A-Za-z0-9_]*(\[\])?|[a-z]+|\(.*\))' 'ts tsx' src | grep -vE 'as (default|namespace)|\* as |\{ *as |as const enum')"; then
     info "type assertions found — rule 6.2: each must be justified, not a silencer:"
     printf '%s\n' "$out" | head -n 5 | sed 's/^/        /'
   else ok "no type assertions"; fi
