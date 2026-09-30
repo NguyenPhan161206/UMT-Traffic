@@ -49,6 +49,7 @@ comment on table public.quiz_submissions is 'Student quiz submissions. One per s
 -- =====================================================
 -- 4. UPDATED_AT TRIGGER
 -- =====================================================
+drop trigger if exists quiz_questions_set_updated_at on public.quiz_questions;
 create trigger quiz_questions_set_updated_at
   before update on public.quiz_questions
   for each row
