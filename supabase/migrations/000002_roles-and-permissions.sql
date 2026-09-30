@@ -47,7 +47,8 @@ comment on table public.role_permissions is 'DYNAMIC: Admin UI lets you add/remo
 -- =====================================================
 insert into public.roles (id, name, description) values
   ('10000000-0000-0000-0000-000000000001'::uuid, 'admin', 'Administrator - full system access'),
-  ('10000000-0000-0000-0000-000000000002'::uuid, 'student', 'Student - take quiz, view own score');
+  ('10000000-0000-0000-0000-000000000002'::uuid, 'student', 'Student - take quiz, view own score')
+on conflict (name) do nothing;
 
 -- =====================================================
 -- 5. ADMIN PERMISSIONS (Full access)
@@ -70,7 +71,8 @@ insert into public.role_permissions (role_id, resource, action) values
   -- Permissions Management
   ('10000000-0000-0000-0000-000000000001'::uuid, 'role_permissions', 'read'),
   ('10000000-0000-0000-0000-000000000001'::uuid, 'role_permissions', 'create'),
-  ('10000000-0000-0000-0000-000000000001'::uuid, 'role_permissions', 'delete');
+  ('10000000-0000-0000-0000-000000000001'::uuid, 'role_permissions', 'delete')
+on conflict (role_id, resource, action) do nothing;
 
 -- =====================================================
 -- 6. STUDENT PERMISSIONS (Minimal access)
@@ -80,7 +82,8 @@ insert into public.role_permissions (role_id, resource, action) values
   ('10000000-0000-0000-0000-000000000002'::uuid, 'quiz_questions', 'read'),
   -- Create & read own submissions
   ('10000000-0000-0000-0000-000000000002'::uuid, 'quiz_submissions', 'create'),
-  ('10000000-0000-0000-0000-000000000002'::uuid, 'quiz_submissions', 'read_own');
+  ('10000000-0000-0000-0000-000000000002'::uuid, 'quiz_submissions', 'read_own')
+on conflict (role_id, resource, action) do nothing;
 
 -- =====================================================
 -- 7. RLS POLICIES (Enforce permissions)
