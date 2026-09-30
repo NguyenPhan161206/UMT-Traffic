@@ -5,7 +5,7 @@
 -- =====================================================
 -- 1. ROLES TABLE (Không đổi)
 -- =====================================================
-create table public.roles (
+create table if not exists public.roles (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   description text,
@@ -17,7 +17,7 @@ comment on table public.roles is 'Static roles: student, admin. For future exten
 -- =====================================================
 -- 2. USER_ROLES (Gán role cho người dùng)
 -- =====================================================
-create table public.user_roles (
+create table if not exists public.user_roles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   role_id uuid not null references public.roles(id) on delete cascade,
@@ -31,7 +31,7 @@ comment on table public.user_roles is 'Maps users to roles. Soft RLS: anyone can
 -- =====================================================
 -- 3. ROLE_PERMISSIONS (Động - Admin chỉnh sửa)
 -- =====================================================
-create table public.role_permissions (
+create table if not exists public.role_permissions (
   id uuid primary key default gen_random_uuid(),
   role_id uuid not null references public.roles(id) on delete cascade,
   resource text not null, -- 'quiz_questions', 'submissions', 'users', etc.
@@ -91,6 +91,7 @@ on conflict (role_id, resource, action) do nothing;
 
 -- roles table: Anyone can read (for UI dropdowns), but only for reference
 alter table public.roles enable row level security;
+drop policy if exists "roles_select_all" on public.roles;
 create policy "roles_select_all"
   on public.roles for select
   to authenticated
@@ -98,6 +99,9 @@ create policy "roles_select_all"
 
 -- user_roles: Read all (UI needs to check roles), write only by admin
 alter table public.user_roles enable row level security;
+drop policy if exists "user_roles_select_all" on public.user_roles;
+drop policy if exists "user_roles_insert_admin_only" on public.user_roles;
+drop policy if exists "user_roles_delete_admin_only" on public.user_roles;
 create policy "user_roles_select_all"
   on public.user_roles for select
   to authenticated
@@ -127,6 +131,9 @@ create policy "user_roles_delete_admin_only"
 
 -- role_permissions: Read all (UI needs to show), write only by admin
 alter table public.role_permissions enable row level security;
+drop policy if exists "role_permissions_select_all" on public.role_permissions;
+drop policy if exists "role_permissions_write_admin_only" on public.role_permissions;
+drop policy if exists "role_permissions_delete_admin_only" on public.role_permissions;
 create policy "role_permissions_select_all"
   on public.role_permissions for select
   to authenticated
