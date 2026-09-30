@@ -25,7 +25,7 @@ create table if not exists public.quiz_questions (
   option_d text not null,
   correct_answer text not null check (correct_answer in ('A', 'B', 'C', 'D')),
   explanation text, -- Explain why this is correct
-  created_by uuid not null references auth.users(id) on delete restrict,
+  created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
