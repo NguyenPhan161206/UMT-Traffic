@@ -8,8 +8,8 @@ alter table public.profiles
   add column if not exists is_registered boolean default false;
 
 -- Create index for filtering by school
-create index idx_profiles_school_id on public.profiles(school_id);
-create index idx_profiles_is_registered on public.profiles(is_registered);
+create index if not exists idx_profiles_school_id on public.profiles(school_id);
+create index if not exists idx_profiles_is_registered on public.profiles(is_registered);
 
 comment on column public.profiles.school_id is 'Reference to schools table.';
 comment on column public.profiles.grade is 'Student grade: 10, 11, or 12.';
@@ -18,8 +18,9 @@ comment on column public.profiles.is_registered is 'Has student completed regist
 -- RLS: Students can only update their own profile during registration
 alter table public.profiles force row level security;
 
--- Remove old policy if exists and add new one
+-- Remove old policies and add new ones
 drop policy if exists "profiles_update_own" on public.profiles;
+drop policy if exists "profiles_select_admin" on public.profiles;
 
 create policy "profiles_update_own"
   on public.profiles for update
