@@ -4,7 +4,7 @@
 -- =====================================================
 -- 1. SCHOOLS TABLE (Danh sách trường)
 -- =====================================================
-create table public.schools (
+create table if not exists public.schools (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   city text,
@@ -16,7 +16,7 @@ comment on table public.schools is 'List of participating high schools.';
 -- =====================================================
 -- 2. QUIZ_QUESTIONS TABLE
 -- =====================================================
-create table public.quiz_questions (
+create table if not exists public.quiz_questions (
   id uuid primary key default gen_random_uuid(),
   question text not null,
   option_a text not null,
@@ -35,7 +35,7 @@ comment on table public.quiz_questions is 'Traffic safety quiz questions. Only a
 -- =====================================================
 -- 3. QUIZ_SUBMISSIONS TABLE (One submission per student)
 -- =====================================================
-create table public.quiz_submissions (
+create table if not exists public.quiz_submissions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   answers jsonb not null, -- {"q1": "A", "q2": "B", ...}
@@ -60,6 +60,11 @@ create trigger quiz_questions_set_updated_at
 
 -- quiz_questions: Student can read, Admin can CRUD
 alter table public.quiz_questions enable row level security;
+
+drop policy if exists "quiz_questions_select_all" on public.quiz_questions;
+drop policy if exists "quiz_questions_insert_admin" on public.quiz_questions;
+drop policy if exists "quiz_questions_update_admin" on public.quiz_questions;
+drop policy if exists "quiz_questions_delete_admin" on public.quiz_questions;
 
 create policy "quiz_questions_select_all"
   on public.quiz_questions for select
@@ -109,6 +114,10 @@ create policy "quiz_questions_delete_admin"
 -- quiz_submissions: Student can create own, read own. Admin can read all and update scores.
 alter table public.quiz_submissions enable row level security;
 
+drop policy if exists "quiz_submissions_insert_own" on public.quiz_submissions;
+drop policy if exists "quiz_submissions_select_own_or_admin" on public.quiz_submissions;
+drop policy if exists "quiz_submissions_update_admin" on public.quiz_submissions;
+
 create policy "quiz_submissions_insert_own"
   on public.quiz_submissions for insert
   to authenticated
@@ -147,6 +156,7 @@ create policy "quiz_submissions_update_admin"
 -- schools: Anyone can read
 alter table public.schools enable row level security;
 
+drop policy if exists "schools_select_all" on public.schools;
 create policy "schools_select_all"
   on public.schools for select
   to authenticated
