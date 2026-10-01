@@ -18,7 +18,7 @@
 -- Identity data, one row per auth user. Deliberately carries no contest data,
 -- so it stays valid regardless of how the business rules are decided.
 
-create table public.profiles (
+create table if not exists public.profiles (
   id           uuid        primary key references auth.users (id) on delete cascade,
   display_name text,
   created_at   timestamptz not null default now(),
@@ -36,6 +36,10 @@ alter table public.profiles force  row level security;
 
 -- With RLS enabled and no policy, every statement is denied by default. The
 -- three policies below are the complete access surface.
+
+drop policy if exists "profiles_select_own" on public.profiles;
+drop policy if exists "profiles_insert_own" on public.profiles;
+drop policy if exists "profiles_update_own" on public.profiles;
 
 create policy "profiles_select_own"
   on public.profiles
@@ -77,6 +81,7 @@ begin
 end;
 $$;
 
+drop trigger if exists profiles_set_updated_at on public.profiles;
 create trigger profiles_set_updated_at
   before update on public.profiles
   for each row
