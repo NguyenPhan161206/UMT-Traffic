@@ -4,9 +4,9 @@ returns trigger as $$
 declare
   student_role_id uuid;
 begin
-  -- Insert profile
-  insert into public.profiles (id, email, display_name)
-  values (new.id, new.email, '')
+  -- Insert profile (email is in auth.users, no need to duplicate)
+  insert into public.profiles (id, display_name)
+  values (new.id, '')
   on conflict (id) do nothing;
 
   -- Get student role id
